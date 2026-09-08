@@ -29,7 +29,7 @@ class ComentarioResponse(ComentarioBase):
     class Config:
         from_attributes = True
 
-# --- Endpoints ---
+# --- Endpoints de Rutas Estáticas / Lista ---
 
 @router.get("", response_model=List[ComentarioResponse])
 @router.get("/", response_model=List[ComentarioResponse])
@@ -40,16 +40,6 @@ def obtener_comentarios(db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Error en GET /api/comentarios: {e}")
         return []
-
-@router.get("/{id}", response_model=ComentarioResponse)
-def obtener_comentario(id: int, db: Session = Depends(get_db)):
-    comentario = db.query(ComentarioModel).filter(ComentarioModel.id == id).first()
-    if not comentario:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Comentario no encontrado",
-        )
-    return comentario
 
 @router.post("", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
@@ -67,7 +57,7 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
             detail=f"Error al registrar comentario: {str(e)}",
         )
 
-# --- Endpoints de Análisis Masivo ---
+# --- Endpoints de Análisis Masivo (Deben ir ANTES de /{id}) ---
 
 @router.post("/analisis-masivo")
 @router.post("/analisis-masivo/")
@@ -108,3 +98,15 @@ def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error durante el análisis masivo: {str(e)}"
         )
+
+# --- Endpoints con Parámetros Dinámicos (SIEMPRE AL FINAL) ---
+
+@router.get("/{id}", response_model=ComentarioResponse)
+def obtener_comentario(id: int, db: Session = Depends(get_db)):
+    comentario = db.query(ComentarioModel).filter(ComentarioModel.id == id).first()
+    if not comentario:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comentario no encontrado",
+        )
+    return comentario
