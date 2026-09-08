@@ -1,54 +1,133 @@
+import os
+import joblib
+import numpy as np
 import nltk
 from collections import Counter
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.pipeline import Pipeline
 
-# Descarga preventiva de todos los paquetes de datos requeridos por NLTK
+# Descarga preventiva de paquetes de NLTK
 recursos_nltk = ['punkt', 'punkt_tab', 'stopwords']
-
 for recurso in recursos_nltk:
     try:
         nltk.data.find(f'tokenizers/{recurso}' if 'punkt' in recurso else f'corpora/{recurso}')
     except LookupError:
         nltk.download(recurso, quiet=True)
 
+MODEL_PATH = "model_sentiment.pkl"
+
+# Dataset de entrenamiento inicial en español para Machine Learning
+DATASET_ENTRENAMIENTO = [
+    # Positivos
+    ("Excelente servicio y muy rápida atención", "Positivo"),
+    ("El soporte técnico resolvió mi problema rápidamente", "Positivo"),
+    ("Muy satisfecho con la atención brindada por el equipo", "Positivo"),
+    ("La plataforma funciona de manera impecable y eficiente", "Positivo"),
+    ("Buen trabajo, todo perfecto y muy rápido", "Positivo"),
+    ("Me ayudaron a resolver la duda de inmediato, gracias", "Positivo"),
+    ("Gran experiencia, respuesta súper rápida y clara", "Positivo"),
+    # Negativos
+    ("El soporte técnico tardó más de lo esperado en resolver nuestra incidencia de facturación", "Negativo"),
+    ("Pésima atención, no me dieron ninguna solución", "Negativo"),
+    ("El servicio es muy lento y presenta constantes fallas", "Negativo"),
+    ("Tengo un reclamo grave con respecto a la facturación cobrada", "Negativo"),
+    ("Hubo un error en el sistema y no responden mis correos", "Negativo"),
+    ("Tardaron días en dar respuesta a mi solicitud de soporte", "Negativo"),
+    ("El sistema falló durante la transacción y no recibí ayuda", "Negativo"),
+    # Neutros
+    ("Quisiera solicitar información sobre los planes disponibles", "Neutro"),
+    ("¿Cuál es el horario de atención al cliente?", "Neutro"),
+    ("Necesito consultar el estado de mi trámite actual", "Neutro"),
+    ("Envié los documentos requeridos a su correo", "Neutro"),
+]
+
+def entrenar_o_cargar_modelo():
+    """Entrena un Pipeline de Machine Learning (TF-IDF + Naive Bayes) si no existe en disco."""
+    if os.path.exists(MODEL_PATH):
+        try:
+            return joblib.load(MODEL_PATH)
+        except Exception as e:
+            print(f"Error al cargar modelo guardado: {e}. Reentrenando...")
+
+    textos = [item[0] for item in DATASET_ENTRENAMIENTO]
+    etiquetas = [item[1] for item in DATASET_ENTRENAMIENTO]
+
+    # Pipeline ML: Vectorizador TF-IDF + Clasificador Multinomial Naive Bayes
+    pipeline = Pipeline([
+        ('tfidf', TfidfVectorizer(ngram_range=(1, 2))),
+        ('clf', MultinomialNB())
+    ])
+
+    pipeline.fit(textos, etiquetas)
+    
+    try:
+        joblib.dump(pipeline, MODEL_PATH)
+    except Exception as e:
+        print(f"No se pudo guardar el modelo en disco: {e}")
+
+    return pipeline
+
+# Instancia global del modelo ML
+modelo_ml = entrenar_o_cargar_modelo()
 
 def analizar_texto_nltk(texto: str) -> dict:
     if not texto or not texto.strip():
         return {
-            "idioma": "es",
-            "cantidad_palabras": 0,
+            "sentimiento": "Neutro",
+            "polaridad": 0.0,
+            "score": 0.0,
             "tokens": [],
             "palabras_frecuentes": [],
             "categoria_detectada": "CONSULTA",
             "confianza": 0.0
         }
 
-    palabras = [p.lower() for p in nltk.word_tokenize(texto) if p.isalnum()]
+    # 1. Extracción de tokens y palabras frecuentes con NLTK
+    texto_lower = texto.lower()
+    palabras = [p for p in nltk.word_tokenize(texto_lower) if p.isalnum()]
     
     try:
         stopwords_es = set(nltk.corpus.stopwords.words('spanish'))
     except Exception:
         stopwords_es = set()
-    
+
     palabras_limpias = [p for p in palabras if p not in stopwords_es]
     conteo = Counter(palabras_limpias)
+    palabras_frecuentes = [{"palabra": p, "frecuencia": f} for p, f in conteo.most_common(5)]
+
+    # 2. Predicción con el Modelo de Machine Learning
+    prediccion = modelo_ml.predict([texto])[0]
+    probabilidades = modelo_ml.predict_proba([texto])[0]
+    clases = list(modelo_ml.classes_)
     
-    palabras_frecuentes = [{"palabra": palabra, "frecuencia": freq} for palabra, freq in conteo.most_common(5)]
-    
-    # Lógica heurística de categorización simple
-    categoria = "CONSULTA"
-    texto_lower = texto.lower()
+    idx_pred = clases.index(prediccion)
+    confianza = float(probabilidades[idx_pred])
+
+    # Cálculo de la polaridad escalar (-1.0 a 1.0) según la clase predicha y su probabilidad
+    if prediccion == "Positivo":
+        polaridad = round(confianza, 2)
+    elif prediccion == "Negativo":
+        polaridad = round(-confianza, 2)
+    else:
+        polaridad = 0.0
+
+    # Categorización temática
     if any(k in texto_lower for k in ["excelente", "rápido", "bueno", "gracias"]):
         categoria = "FELICITACION"
-    elif any(k in texto_lower for k in ["problema", "fallo", "error", "tardó", "reclamo"]):
+    elif any(k in texto_lower for k in ["problema", "fallo", "error", "tardó", "reclamo", "incidencia"]):
         categoria = "RECLAMO"
-    elif any(k in texto_lower for k in ["soporte", "ayuda", "incidencia"]):
+    elif any(k in texto_lower for k in ["soporte", "ayuda"]):
         categoria = "SOPORTE"
+    else:
+        categoria = "CONSULTA"
 
     return {
-        "idioma": "es",
-        "cantidad_palabras": len(palabras),
+        "sentimiento": prediccion,
+        "polaridad": polaridad,
+        "score": polaridad,
         "tokens": palabras_limpias,
         "palabras_frecuentes": palabras_frecuentes,
         "categoria_detectada": categoria,
-        "confianza": 0.9250
+        "confianza": round(confianza, 4)
     }
