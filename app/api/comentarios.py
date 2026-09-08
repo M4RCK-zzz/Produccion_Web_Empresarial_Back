@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
 from app.database.models import ComentarioModel
+from app.services.nltk_service import analizar_texto_nltk
 
 router = APIRouter()
 
@@ -64,4 +65,46 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al registrar comentario: {str(e)}",
+        )
+
+# --- Endpoints de Análisis Masivo ---
+
+@router.post("/analisis-masivo")
+@router.post("/analisis-masivo/")
+def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
+    """
+    Procesa todos los comentarios de la BD con el modelo ML/NLTK, 
+    actualizando su polaridad, sentimiento y estado en Supabase.
+    """
+    try:
+        comentarios = db.query(ComentarioModel).all()
+        if not comentarios:
+            return {"message": "No hay comentarios para analizar", "procesados": 0}
+
+        procesados_count = 0
+        for com in comentarios:
+            resultado = analizar_texto_nltk(com.contenido)
+            
+            if hasattr(com, "sentimiento"):
+                com.sentimiento = resultado["sentimiento"]
+            if hasattr(com, "polaridad"):
+                com.polaridad = resultado["polaridad"]
+            if hasattr(com, "categoria"):
+                com.categoria = resultado["categoria_detectada"]
+                
+            com.procesado = True
+            com.estado = "analizado"
+            procesados_count += 1
+
+        db.commit()
+        return {
+            "message": "Análisis masivo completado exitosamente",
+            "procesados": procesados_count
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error durante el análisis masivo: {str(e)}"
         )
