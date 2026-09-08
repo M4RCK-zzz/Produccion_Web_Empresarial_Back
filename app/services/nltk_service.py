@@ -1,17 +1,33 @@
-# backend/app/services/nltk_service.py
 import nltk
 from collections import Counter
 
-# Asegurarse de tener los recursos básicos descargados
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
+# Descarga preventiva de todos los paquetes de datos requeridos por NLTK
+recursos_nltk = ['punkt', 'punkt_tab', 'stopwords']
+
+for recurso in recursos_nltk:
+    try:
+        nltk.data.find(f'tokenizers/{recurso}' if 'punkt' in recurso else f'corpora/{recurso}')
+    except LookupError:
+        nltk.download(recurso, quiet=True)
+
 
 def analizar_texto_nltk(texto: str) -> dict:
+    if not texto or not texto.strip():
+        return {
+            "idioma": "es",
+            "cantidad_palabras": 0,
+            "tokens": [],
+            "palabras_frecuentes": [],
+            "categoria_detectada": "CONSULTA",
+            "confianza": 0.0
+        }
+
     palabras = [p.lower() for p in nltk.word_tokenize(texto) if p.isalnum()]
-    stopwords_es = set(nltk.corpus.stopwords.words('spanish')) if 'spanish' in nltk.corpus.stopwords.fileids() else set()
+    
+    try:
+        stopwords_es = set(nltk.corpus.stopwords.words('spanish'))
+    except Exception:
+        stopwords_es = set()
     
     palabras_limpias = [p for p in palabras if p not in stopwords_es]
     conteo = Counter(palabras_limpias)
