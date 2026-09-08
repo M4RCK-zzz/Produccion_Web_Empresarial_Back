@@ -1,4 +1,3 @@
-# backend/app/main.py
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,9 +7,10 @@ from app.api.clientes import router as clientes_router
 from app.api.comentarios import router as comentarios_router
 from app.api.scipy import router as scipy_router
 
-app = FastAPI(title="Empresa Inteligente API")
+app = FastAPI(title="Empresa Inteligente API", redirect_slashes=False)
 
 origins = [
+    "https://produccion-web-empresarial-front.vercel.app",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
