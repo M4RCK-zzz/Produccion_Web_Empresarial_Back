@@ -1,4 +1,3 @@
-# backend/app/api/comentarios.py
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,8 +9,7 @@ from app.database.models import ComentarioModel
 
 router = APIRouter()
 
-
-# --- Esquemas de Pydantic ---
+# --- Esquemas Pydantic ---
 class ComentarioBase(BaseModel):
     contenido: str
     canal: Optional[str] = "web"
@@ -19,10 +17,8 @@ class ComentarioBase(BaseModel):
     categoria: Optional[str] = None
     cliente_id: Optional[int] = None
 
-
 class ComentarioCreate(ComentarioBase):
     pass
-
 
 class ComentarioResponse(ComentarioBase):
     id: int
@@ -32,10 +28,8 @@ class ComentarioResponse(ComentarioBase):
     class Config:
         from_attributes = True
 
-
 # --- Endpoints ---
 
-# Soporta /api/comentarios y /api/comentarios/
 @router.get("", response_model=List[ComentarioResponse])
 @router.get("/", response_model=List[ComentarioResponse])
 def obtener_comentarios(db: Session = Depends(get_db)):
@@ -46,7 +40,6 @@ def obtener_comentarios(db: Session = Depends(get_db)):
         print(f"Error en GET /api/comentarios: {e}")
         return []
 
-
 @router.get("/{id}", response_model=ComentarioResponse)
 def obtener_comentario(id: int, db: Session = Depends(get_db)):
     comentario = db.query(ComentarioModel).filter(ComentarioModel.id == id).first()
@@ -56,7 +49,6 @@ def obtener_comentario(id: int, db: Session = Depends(get_db)):
             detail="Comentario no encontrado",
         )
     return comentario
-
 
 @router.post("", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)

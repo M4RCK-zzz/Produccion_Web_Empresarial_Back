@@ -1,4 +1,3 @@
-# backend/app/api/clientes.py
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
@@ -33,7 +32,9 @@ class ClienteResponse(ClienteBase):
 
 # --- Endpoints ---
 
+# Aceptar solicitudes tanto con barra / como sin barra
 @router.get("", response_model=List[ClienteResponse])
+@router.get("/", response_model=List[ClienteResponse])
 def obtener_clientes(db: Session = Depends(get_db)):
     try:
         clientes = db.query(ClienteModel).all()
@@ -43,6 +44,7 @@ def obtener_clientes(db: Session = Depends(get_db)):
         return []
 
 @router.post("", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED)
 def crear_cliente(cliente_in: ClienteCreate, db: Session = Depends(get_db)):
     # 1. Validar si el email ya existe
     cliente_existente = db.query(ClienteModel).filter(ClienteModel.email == cliente_in.email).first()

@@ -1,4 +1,3 @@
-# backend/app/api/scipy.py
 from datetime import date
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,35 +14,25 @@ from app.services.scipy_service import (
 
 router = APIRouter()
 
-
-# --- Esquema para validación de entrada ---
 class EstadisticasPayload(BaseModel):
     valores: Optional[List[float]] = None
 
-
 # --- Endpoints ---
 
-# Decoradores dobles para soportar solicitudes con y sin "/"
 @router.get("/estadisticas")
 @router.get("/estadisticas/")
 def obtener_metricas_base(db: Session = Depends(get_db)):
     try:
-        # Consulta optimizada: solo obtiene la columna requerida
         registros = db.query(TiemposAtencionModel.tiempo_minutos).all()
-
-        # Extraer y castear explícitamente a float para prevenir conflictos con Decimal
         valores = [float(r[0]) for r in registros if r[0] is not None]
 
-        # Si no existen registros cargados en Supabase, se retornan valores por defecto
         if not valores:
             valores = [12.0, 15.5, 18.0, 20.25, 11.0]
 
         return calcular_estadisticas_avanzadas(valores)
     except Exception as e:
         print(f"Error en GET /api/scipy/estadisticas: {e}")
-        # Retorno defensivo para no romper la carga en React
         return calcular_estadisticas_avanzadas([12.0, 15.5, 18.0, 20.25, 11.0])
-
 
 @router.post("/estadisticas")
 @router.post("/estadisticas/")
@@ -52,7 +41,6 @@ def post_estadisticas(
     db: Session = Depends(get_db),
 ):
     try:
-        # 1. Determinar el origen de los valores
         if payload and payload.valores:
             valores = payload.valores
         else:
@@ -65,10 +53,8 @@ def post_estadisticas(
                 detail="No hay datos suficientes para calcular las estadísticas.",
             )
 
-        # 2. Procesar con SciPy
         resultado_scipy = calcular_estadisticas_avanzadas(valores)
 
-        # 3. Guardar formalmente el cálculo en la BD
         nueva_metrica = MetricasEstadisticasModel(
             fecha_inicio=date.today(),
             fecha_fin=date.today(),
@@ -99,13 +85,11 @@ def post_estadisticas(
             detail=f"Error al guardar la métrica en la BD: {str(e)}",
         )
 
-
 @router.post("/optimizacion")
 @router.post("/optimizacion/")
 def post_optimizacion(payload: dict):
     resultado = ejecutar_optimizacion_lineal(payload)
     return {"parametros_entrada": payload, "resultado": resultado}
-
 
 @router.post("/interpolacion")
 @router.post("/interpolacion/")
