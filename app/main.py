@@ -2,15 +2,18 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# 1. Importar todos los routers (incluidos NLTK y Métricas)
+# 1. Importar todos los routers
 from app.api.clientes import router as clientes_router
 from app.api.comentarios import router as comentarios_router
 from app.api.metricas import router as metricas_router
 from app.api.nltk import router as nltk_router
 from app.api.scipy import router as scipy_router
+from app.api.reportes import router as reportes_router
 
+# 2. Inicializar la instancia de FastAPI
 app = FastAPI(title="Empresa Inteligente API")
 
+# 3. Configuración de CORS
 origins = [
     "https://produccion-web-empresarial-front.vercel.app",
     "http://localhost:5173",
@@ -26,14 +29,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Registrar los routers con sus prefijos /api
+# 4. Registrar los routers (después de instanciar app)
 app.include_router(clientes_router, prefix="/api/clientes", tags=["Clientes"])
 app.include_router(comentarios_router, prefix="/api/comentarios", tags=["Comentarios"])
 app.include_router(metricas_router, prefix="/api/metricas", tags=["Métricas"])
 app.include_router(nltk_router, prefix="/api/nltk", tags=["NLTK"])
 app.include_router(scipy_router, prefix="/api/scipy", tags=["SciPy"])
+app.include_router(reportes_router, prefix="/api/reportes", tags=["Reportes"])
 
-
+# 5. Controlador global de excepciones
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     print(f"Excepción no controlada en {request.url}: {exc}")
