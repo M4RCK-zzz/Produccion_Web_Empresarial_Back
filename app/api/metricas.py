@@ -2,7 +2,9 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-@router.get("/")
+# Doble decorador para evitar problemas de slashes
+@router.get("", summary="Obtener métricas del sistema")
+@router.get("/", summary="Obtener métricas del sistema")
 def obtener_metricas():
     return {
         "eficienciaOperativa": "94.2%",

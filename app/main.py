@@ -2,9 +2,10 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# 1. Importar todos los routers (incluido NLTK)
+# 1. Importar todos los routers (incluidos NLTK y Métricas)
 from app.api.clientes import router as clientes_router
 from app.api.comentarios import router as comentarios_router
+from app.api.metricas import router as metricas_router
 from app.api.nltk import router as nltk_router
 from app.api.scipy import router as scipy_router
 
@@ -28,6 +29,7 @@ app.add_middleware(
 # 2. Registrar los routers con sus prefijos /api
 app.include_router(clientes_router, prefix="/api/clientes", tags=["Clientes"])
 app.include_router(comentarios_router, prefix="/api/comentarios", tags=["Comentarios"])
+app.include_router(metricas_router, prefix="/api/metricas", tags=["Métricas"])
 app.include_router(nltk_router, prefix="/api/nltk", tags=["NLTK"])
 app.include_router(scipy_router, prefix="/api/scipy", tags=["SciPy"])
 
