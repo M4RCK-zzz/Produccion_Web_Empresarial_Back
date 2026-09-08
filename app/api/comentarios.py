@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.database.models import ComentarioModel
+from app.database.models import ComentarioModel, ClienteModel  # Asegúrate de importar ClienteModel
 from app.services.nltk_service import analizar_texto_nltk
 
 router = APIRouter()
@@ -21,10 +21,18 @@ class ComentarioBase(BaseModel):
 class ComentarioCreate(ComentarioBase):
     pass
 
+# Esquema extendido para incluir datos de la tabla Clientes y de NLP
 class ComentarioResponse(ComentarioBase):
     id: int
     procesado: Optional[bool] = False
     fecha: Optional[datetime] = None
+    
+    # Nuevos campos para que el Frontend los reconozca directamente
+    cliente: Optional[str] = "Cliente Anónimo"
+    empresa: Optional[str] = "N/A"
+    departamento: Optional[str] = "General"
+    polaridad: Optional[float] = 0.0
+    sentimiento: Optional[str] = "Pendiente"
 
     class Config:
         from_attributes = True
@@ -35,8 +43,32 @@ class ComentarioResponse(ComentarioBase):
 @router.get("/", response_model=List[ComentarioResponse])
 def obtener_comentarios(db: Session = Depends(get_db)):
     try:
-        comentarios = db.query(ComentarioModel).all()
-        return comentarios if comentarios else []
+        # Consulta con LEFT JOIN hacia la tabla clientes
+        resultados = db.query(ComentarioModel, ClienteModel)\
+            .outerjoin(ClienteModel, ComentarioModel.cliente_id == ClienteModel.id)\
+            .all()
+
+        respuesta = []
+        for com, cli in resultados:
+            respuesta.append({
+                "id": com.id,
+                "contenido": com.contenido,
+                "canal": com.canal,
+                "estado": com.estado,
+                "categoria": com.categoria,
+                "cliente_id": com.cliente_id,
+                "procesado": com.procesado,
+                "fecha": com.fecha,
+                # Datos extraídos del JOIN
+                "cliente": cli.nombre if cli else "Cliente Anónimo",
+                "empresa": cli.empresa if cli else "Empresa N/A",
+                "departamento": com.categoria or "General",
+                # Datos de NLP (si existen en el modelo)
+                "polaridad": getattr(com, "polaridad", 0.0),
+                "sentimiento": getattr(com, "sentimiento", "Pendiente")
+            })
+
+        return respuesta
     except Exception as e:
         print(f"Error en GET /api/comentarios: {e}")
         return []
@@ -57,15 +89,11 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
             detail=f"Error al registrar comentario: {str(e)}",
         )
 
-# --- Endpoints de Análisis Masivo (Deben ir ANTES de /{id}) ---
+# --- Endpoints de Análisis Masivo ---
 
 @router.post("/analisis-masivo")
 @router.post("/analisis-masivo/")
 def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
-    """
-    Procesa todos los comentarios de la BD con el modelo ML/NLTK, 
-    actualizando su polaridad, sentimiento y estado en Supabase.
-    """
     try:
         comentarios = db.query(ComentarioModel).all()
         if not comentarios:
@@ -74,14 +102,14 @@ def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
         procesados_count = 0
         for com in comentarios:
             resultado = analizar_texto_nltk(com.contenido)
-            
+
             if hasattr(com, "sentimiento"):
-                com.sentimiento = resultado["sentimiento"]
+                com.sentimiento = resultado.get("sentimiento", "Neutro")
             if hasattr(com, "polaridad"):
-                com.polaridad = resultado["polaridad"]
+                com.polaridad = resultado.get("polaridad", 0.0)
             if hasattr(com, "categoria"):
-                com.categoria = resultado["categoria_detectada"]
-                
+                com.categoria = resultado.get("categoria_detectada", com.categoria)
+
             com.procesado = True
             com.estado = "analizado"
             procesados_count += 1
@@ -96,10 +124,10 @@ def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error durante el análisis masivo: {str(e)}"
+            detail=f"Error durante el análisis masivo: {str(e)}",
         )
 
-# --- Endpoints con Parámetros Dinámicos (SIEMPRE AL FINAL) ---
+# --- Endpoints Dinámicos (Al final) ---
 
 @router.get("/{id}", response_model=ComentarioResponse)
 def obtener_comentario(id: int, db: Session = Depends(get_db)):
