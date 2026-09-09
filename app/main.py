@@ -8,7 +8,7 @@ from app.api.metricas import router as metricas_router
 from app.api.nltk import router as nltk_router
 from app.api.scipy import router as scipy_router
 from app.api.reportes import router as reportes_router
-from app.api.dashboard_api import router as dashboard_router  # NUEVO
+from app.api.dashboard_api import router as dashboard_router
 
 app = FastAPI(title="Empresa Inteligente API")
 
@@ -27,13 +27,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(clientes_router,   prefix="/api/clientes",   tags=["Clientes"])
-app.include_router(comentarios_router, prefix="/api/comentarios", tags=["Comentarios"])
-app.include_router(metricas_router,   prefix="/api/metricas",   tags=["Métricas"])
-app.include_router(nltk_router,       prefix="/api/nltk",       tags=["NLTK"])
-app.include_router(scipy_router,      prefix="/api/scipy",      tags=["SciPy"])
-app.include_router(reportes_router,   prefix="/api/reportes",   tags=["Reportes"])
-app.include_router(dashboard_router,  prefix="/api/dashboard",  tags=["Dashboard"])  # NUEVO
+# Registra los routers directos (ya traen su prefijo /api/... definido internamente)
+app.include_router(clientes_router)
+app.include_router(comentarios_router)
+app.include_router(metricas_router)
+app.include_router(nltk_router)
+app.include_router(scipy_router)
+app.include_router(reportes_router)
+app.include_router(dashboard_router)  # ✅ Sin duplicar /api/dashboard
 
 
 @app.exception_handler(Exception)
