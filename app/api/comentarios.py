@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.database.models import ComentarioModel, ClienteModel  # Asegúrate de importar ClienteModel
+from app.database.models import ComentarioModel, ClienteModel, AnalisisNlpModel
 from app.services.nltk_service import analizar_texto_nltk
 
 router = APIRouter()
@@ -21,13 +21,11 @@ class ComentarioBase(BaseModel):
 class ComentarioCreate(ComentarioBase):
     pass
 
-# Esquema extendido para incluir datos de la tabla Clientes y de NLP
 class ComentarioResponse(ComentarioBase):
     id: int
     procesado: Optional[bool] = False
     fecha: Optional[datetime] = None
     
-    # Nuevos campos para que el Frontend los reconozca directamente
     cliente: Optional[str] = "Cliente Anónimo"
     empresa: Optional[str] = "N/A"
     departamento: Optional[str] = "General"
@@ -43,13 +41,26 @@ class ComentarioResponse(ComentarioBase):
 @router.get("/", response_model=List[ComentarioResponse])
 def obtener_comentarios(db: Session = Depends(get_db)):
     try:
-        # Consulta con LEFT JOIN hacia la tabla clientes
-        resultados = db.query(ComentarioModel, ClienteModel)\
+        # LEFT JOIN con clientes y analisis_nlp
+        resultados = db.query(ComentarioModel, ClienteModel, AnalisisNlpModel)\
             .outerjoin(ClienteModel, ComentarioModel.cliente_id == ClienteModel.id)\
+            .outerjoin(AnalisisNlpModel, ComentarioModel.id == AnalisisNlpModel.comentario_id)\
             .all()
 
         respuesta = []
-        for com, cli in resultados:
+        for com, cli, nlp in resultados:
+            polaridad_val = nlp.confianza if nlp and nlp.confianza is not None else 0.0
+            
+            # Lógica para inferir el texto de sentimiento
+            if not com.procesado:
+                sentimiento_str = "Pendiente"
+            elif polaridad_val > 0.05:
+                sentimiento_str = "Positivo"
+            elif polaridad_val < -0.05:
+                sentimiento_str = "Negativo"
+            else:
+                sentimiento_str = "Neutro"
+
             respuesta.append({
                 "id": com.id,
                 "contenido": com.contenido,
@@ -59,13 +70,11 @@ def obtener_comentarios(db: Session = Depends(get_db)):
                 "cliente_id": com.cliente_id,
                 "procesado": com.procesado,
                 "fecha": com.fecha,
-                # Datos extraídos del JOIN
-                "cliente": cli.nombre if cli else "Cliente Anónimo",
-                "empresa": cli.empresa if cli else "Empresa N/A",
+                "cliente": cli.nombre if cli else f"Cliente #{com.cliente_id or com.id}",
+                "empresa": cli.empresa if cli else "N/A",
                 "departamento": com.categoria or "General",
-                # Datos de NLP (si existen en el modelo)
-                "polaridad": getattr(com, "polaridad", 0.0),
-                "sentimiento": getattr(com, "sentimiento", "Pendiente")
+                "polaridad": polaridad_val,
+                "sentimiento": sentimiento_str
             })
 
         return respuesta
@@ -103,15 +112,21 @@ def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
         for com in comentarios:
             resultado = analizar_texto_nltk(com.contenido)
 
-            if hasattr(com, "sentimiento"):
-                com.sentimiento = resultado.get("sentimiento", "Neutro")
-            if hasattr(com, "polaridad"):
-                com.polaridad = resultado.get("polaridad", 0.0)
-            if hasattr(com, "categoria"):
-                com.categoria = resultado.get("categoria_detectada", com.categoria)
-
+            # 1. Actualizar estado de la tabla comentarios
             com.procesado = True
             com.estado = "analizado"
+            if resultado.get("categoria_detectada"):
+                com.categoria = resultado.get("categoria_detectada")
+
+            # 2. Insertar o actualizar registro en analisis_nlp
+            registro_nlp = db.query(AnalisisNlpModel).filter(AnalisisNlpModel.comentario_id == com.id).first()
+            if not registro_nlp:
+                registro_nlp = AnalisisNlpModel(comentario_id=com.id)
+                db.add(registro_nlp)
+
+            registro_nlp.confianza = resultado.get("polaridad", 0.0)
+            registro_nlp.categoria_detectada = resultado.get("categoria_detectada", com.categoria)
+
             procesados_count += 1
 
         db.commit()
