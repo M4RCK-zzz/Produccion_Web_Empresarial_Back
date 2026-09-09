@@ -16,7 +16,6 @@ def _obtener_graficos(db: Session) -> dict:
     tendencia_meses = []
     
     for i in range(5, -1, -1):
-        # Cálculo exacto del periodo mensual
         ano_target = hoy.year
         mes_target = hoy.month - i
         while mes_target <= 0:
@@ -29,7 +28,6 @@ def _obtener_graficos(db: Session) -> dict:
         else:
             ultimo_dia = date(ano_target, mes_target + 1, 1) - timedelta(days=1)
 
-        # 1. Total comentarios del mes
         total_comentarios = (
             db.query(ComentarioModel)
             .filter(
@@ -39,7 +37,6 @@ def _obtener_graficos(db: Session) -> dict:
             .count()
         )
 
-        # 2. Comentarios positivos del mes
         positivos = (
             db.query(ComentarioModel)
             .join(AnalisisNlpModel, ComentarioModel.id == AnalisisNlpModel.comentario_id)
@@ -60,15 +57,30 @@ def _obtener_graficos(db: Session) -> dict:
             "negativos": negativos,
         })
 
-    # Distribución por sentimiento general (Protección contra listas vacías)
+    # Distribución por sentimiento
     total_analisis = db.query(AnalisisNlpModel).count()
     pos_total = db.query(AnalisisNlpModel).filter(AnalisisNlpModel.confianza > 0.05).count()
     neg_total = db.query(AnalisisNlpModel).filter(AnalisisNlpModel.confianza < -0.05).count()
     neu_total = max(total_analisis - pos_total - neg_total, 0)
 
-    # Tiempo promedio de atención (Evita error 500 cuando el promedio retorna None)
+    # Tiempo promedio de atención
     tiempo_prom_scalar = db.query(func.avg(TiempoAtencionModel.tiempo_minutos)).scalar()
     tiempo_prom = round(float(tiempo_prom_scalar), 2) if tiempo_prom_scalar is not None else 0.0
+
+    # ✅ Agrupamiento corregido: consultar categoría desde AnalisisNlpModel
+    categorias_query = (
+        db.query(
+            AnalisisNlpModel.categoria_detectada,
+            func.count(AnalisisNlpModel.id)
+        )
+        .group_by(AnalisisNlpModel.categoria_detectada)
+        .all()
+    )
+    
+    distribucion_categorias = [
+        {"categoria": cat or "GENERAL", "total": cantidad}
+        for cat, cantidad in categorias_query
+    ] if categorias_query else [{"categoria": "GENERAL", "total": total_analisis}]
 
     return {
         "tendencia_mensual": tendencia_meses,
@@ -77,6 +89,7 @@ def _obtener_graficos(db: Session) -> dict:
             {"nombre": "Neutros", "valor": neu_total},
             {"nombre": "Negativos", "valor": neg_total},
         ],
+        "distribucion_categorias": distribucion_categorias,
         "tiempo_promedio_minutos": tiempo_prom,
     }
 
@@ -87,7 +100,6 @@ def obtener_graficos_dashboard(db: Session = Depends(get_db)):
     try:
         return _obtener_graficos(db)
     except Exception as e:
-        # Imprime el error exacto en los logs de Render para depuración
         print(f"Error en /api/dashboard/graficos: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
