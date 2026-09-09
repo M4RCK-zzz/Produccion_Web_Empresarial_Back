@@ -6,14 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.database.models import (
-    ComentarioModel,
-    ClienteModel,
-    AnalisisNlpModel,
-    TiempoAtencionModel,
-    MetricasEstadisticasModel,
-    OptimizacionModel,
-)
+
 from app.services.scipy_service import (
     calcular_estadisticas_avanzadas,
     ejecutar_interpolacion,
