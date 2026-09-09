@@ -11,6 +11,7 @@ from app.services.nltk_service import analizar_texto_nltk
 router = APIRouter()
 
 # --- Esquemas Pydantic ---
+
 class ComentarioBase(BaseModel):
     contenido: str
     canal: Optional[str] = "web"
@@ -22,8 +23,14 @@ class ComentarioCreate(ComentarioBase):
     cliente_nombre: Optional[str] = None
     empresa: Optional[str] = None
 
-class ComentarioResponse(ComentarioBase):
+# ⚠️ Desacoplamos ComentarioResponse de ComentarioBase para evitar discrepancias de serialización
+class ComentarioResponse(BaseModel):
     id: int
+    contenido: str
+    canal: Optional[str] = "web"
+    estado: Optional[str] = "pendiente"
+    categoria: Optional[str] = None
+    cliente_id: Optional[int] = None
     procesado: Optional[bool] = False
     fecha: Optional[datetime] = None
     
@@ -36,57 +43,66 @@ class ComentarioResponse(ComentarioBase):
     class Config:
         from_attributes = True
 
-# --- Endpoints de Rutas Estáticas / Lista ---
+
+# --- Función Auxiliar de Formateo ---
+
+def construir_respuesta_comentario(com: ComentarioModel, cli: Optional[ClienteModel], nlp: Optional[AnalisisNlpModel]) -> dict:
+    polaridad_val = nlp.confianza if nlp and nlp.confianza is not None else 0.0
+    
+    if not com.procesado:
+        sentimiento_str = "Pendiente"
+    elif polaridad_val > 0.05:
+        sentimiento_str = "Positivo"
+    elif polaridad_val < -0.05:
+        sentimiento_str = "Negativo"
+    else:
+        sentimiento_str = "Neutro"
+
+    # Se prioriza el nombre guardado en la tabla clientes
+    nombre_cliente = cli.nombre if (cli and cli.nombre) else f"Cliente #{com.cliente_id or com.id}"
+    empresa_cliente = cli.empresa if (cli and cli.empresa) else "N/A"
+
+    return {
+        "id": com.id,
+        "contenido": com.contenido,
+        "canal": com.canal,
+        "estado": com.estado,
+        "categoria": com.categoria,
+        "cliente_id": com.cliente_id,
+        "procesado": com.procesado,
+        "fecha": com.fecha,
+        "cliente": nombre_cliente,
+        "empresa": empresa_cliente,
+        "departamento": com.categoria or "General",
+        "polaridad": polaridad_val,
+        "sentimiento": sentimiento_str
+    }
+
+
+# --- Endpoints ---
 
 @router.get("", response_model=List[ComentarioResponse])
 @router.get("/", response_model=List[ComentarioResponse])
 def obtener_comentarios(db: Session = Depends(get_db)):
     try:
-        # LEFT JOIN con clientes y analisis_nlp
         resultados = db.query(ComentarioModel, ClienteModel, AnalisisNlpModel)\
             .outerjoin(ClienteModel, ComentarioModel.cliente_id == ClienteModel.id)\
             .outerjoin(AnalisisNlpModel, ComentarioModel.id == AnalisisNlpModel.comentario_id)\
+            .order_by(ComentarioModel.id.desc())\
             .all()
 
-        respuesta = []
-        for com, cli, nlp in resultados:
-            polaridad_val = nlp.confianza if nlp and nlp.confianza is not None else 0.0
-            
-            if not com.procesado:
-                sentimiento_str = "Pendiente"
-            elif polaridad_val > 0.05:
-                sentimiento_str = "Positivo"
-            elif polaridad_val < -0.05:
-                sentimiento_str = "Negativo"
-            else:
-                sentimiento_str = "Neutro"
-
-            respuesta.append({
-                "id": com.id,
-                "contenido": com.contenido,
-                "canal": com.canal,
-                "estado": com.estado,
-                "categoria": com.categoria,
-                "cliente_id": com.cliente_id,
-                "procesado": com.procesado,
-                "fecha": com.fecha,
-                "cliente": cli.nombre if cli else f"Cliente #{com.cliente_id or com.id}",
-                "empresa": cli.empresa if cli else "N/A",
-                "departamento": com.categoria or "General",
-                "polaridad": polaridad_val,
-                "sentimiento": sentimiento_str
-            })
-
-        return respuesta
+        return [construir_respuesta_comentario(com, cli, nlp) for com, cli, nlp in resultados]
     except Exception as e:
         print(f"Error en GET /api/comentarios: {e}")
         return []
+
 
 @router.post("", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
 def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_db)):
     try:
         cliente_id_asignado = comentario_in.cliente_id
+        cliente_obj = None
 
         # Busca o crea el cliente si se envió un nombre desde el formulario
         if comentario_in.cliente_nombre and not cliente_id_asignado:
@@ -96,6 +112,7 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
 
             if cliente_existente:
                 cliente_id_asignado = cliente_existente.id
+                cliente_obj = cliente_existente
             else:
                 nuevo_cliente = ClienteModel(
                     nombre=comentario_in.cliente_nombre,
@@ -105,8 +122,10 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
                 db.commit()
                 db.refresh(nuevo_cliente)
                 cliente_id_asignado = nuevo_cliente.id
+                cliente_obj = nuevo_cliente
+        elif cliente_id_asignado:
+            cliente_obj = db.query(ClienteModel).filter(ClienteModel.id == cliente_id_asignado).first()
 
-        # Prepara los datos excluyendo los campos adicionales para ComentarioModel
         datos_comentario = comentario_in.model_dump(exclude={"cliente_nombre", "empresa"})
         datos_comentario["cliente_id"] = cliente_id_asignado
 
@@ -115,7 +134,8 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
         db.commit()
         db.refresh(nuevo_comentario)
 
-        return nuevo_comentario
+        # Devolvemos el diccionario estructurado con la información del cliente recién vinculado
+        return construir_respuesta_comentario(nuevo_comentario, cliente_obj, None)
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -123,7 +143,6 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
             detail=f"Error al registrar comentario: {str(e)}",
         )
 
-# --- Endpoints de Análisis Masivo ---
 
 @router.post("/analisis-masivo")
 @router.post("/analisis-masivo/")
@@ -137,13 +156,11 @@ def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
         for com in comentarios:
             resultado = analizar_texto_nltk(com.contenido)
 
-            # 1. Actualizar estado de la tabla comentarios
             com.procesado = True
             com.estado = "analizado"
             if resultado.get("categoria_detectada"):
                 com.categoria = resultado.get("categoria_detectada")
 
-            # 2. Insertar o actualizar registro en analisis_nlp
             registro_nlp = db.query(AnalisisNlpModel).filter(AnalisisNlpModel.comentario_id == com.id).first()
             if not registro_nlp:
                 registro_nlp = AnalisisNlpModel(comentario_id=com.id)
@@ -167,14 +184,20 @@ def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
             detail=f"Error durante el análisis masivo: {str(e)}",
         )
 
-# --- Endpoints Dinámicos (Al final) ---
 
 @router.get("/{id}", response_model=ComentarioResponse)
 def obtener_comentario(id: int, db: Session = Depends(get_db)):
-    comentario = db.query(ComentarioModel).filter(ComentarioModel.id == id).first()
-    if not comentario:
+    resultado = db.query(ComentarioModel, ClienteModel, AnalisisNlpModel)\
+        .outerjoin(ClienteModel, ComentarioModel.cliente_id == ClienteModel.id)\
+        .outerjoin(AnalisisNlpModel, ComentarioModel.id == AnalisisNlpModel.comentario_id)\
+        .filter(ComentarioModel.id == id)\
+        .first()
+
+    if not resultado:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Comentario no encontrado",
         )
-    return comentario
+    
+    com, cli, nlp = resultado
+    return construir_respuesta_comentario(com, cli, nlp)
