@@ -69,13 +69,13 @@ def _obtener_graficos(db: Session) -> dict:
     tiempo_prom_scalar = db.query(func.avg(TiempoAtencionModel.tiempo_minutos)).scalar()
     tiempo_prom = round(float(tiempo_prom_scalar), 2) if tiempo_prom_scalar is not None else 0.0
 
-    # Agrupamiento por categoría en AnalisisNlpModel
+    # Agrupamiento corregido: Se utiliza `sentimiento` en lugar del campo inexistente `categoria_detectada`
     categorias_query = (
         db.query(
-            AnalisisNlpModel.categoria_detectada,
+            AnalisisNlpModel.sentimiento,
             func.count(AnalisisNlpModel.id)
         )
-        .group_by(AnalisisNlpModel.categoria_detectada)
+        .group_by(AnalisisNlpModel.sentimiento)
         .all()
     )
     

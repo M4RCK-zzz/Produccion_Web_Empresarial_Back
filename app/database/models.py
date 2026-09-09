@@ -1,5 +1,5 @@
-from sqlalchemy import Column, BigInteger, Integer, String, Boolean, Text, Numeric, Date, ForeignKey, func
-from sqlalchemy.dialects.postgresql import TIMESTAMP
+from sqlalchemy import Column, BigInteger, Integer, String, Boolean, Text, Numeric, Date, ForeignKey, DateTime, func
+from sqlalchemy.orm import relationship
 from app.database.connection import Base
 
 
@@ -13,7 +13,11 @@ class ClienteModel(Base):
     telefono = Column(String(30))
     empresa = Column(String(100))
     activo = Column(Boolean, default=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones ORM
+    comentarios = relationship("ComentarioModel", back_populates="cliente", cascade="all, delete-orphan")
+    tiempos_atencion = relationship("TiempoAtencionModel", back_populates="cliente")
 
 
 class ComentarioModel(Base):
@@ -21,10 +25,14 @@ class ComentarioModel(Base):
     __table_args__ = {'extend_existing': True}
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    cliente_id = Column(BigInteger, ForeignKey("clientes.id"), nullable=True)
+    cliente_id = Column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
     texto = Column(Text, nullable=False)
-    fecha = Column(TIMESTAMP, server_default=func.now())
+    fecha = Column(DateTime(timezone=True), server_default=func.now())
     procesado = Column(Boolean, default=False)
+
+    # Relaciones ORM
+    cliente = relationship("ClienteModel", back_populates="comentarios")
+    analisis_nlp = relationship("AnalisisNlpModel", back_populates="comentario", uselist=False, cascade="all, delete-orphan")
 
 
 class AnalisisNlpModel(Base):
@@ -32,11 +40,14 @@ class AnalisisNlpModel(Base):
     __table_args__ = {'extend_existing': True}
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    comentario_id = Column(BigInteger, ForeignKey("comentarios.id"), nullable=False)
+    comentario_id = Column(BigInteger, ForeignKey("comentarios.id", ondelete="CASCADE"), nullable=False)
     sentimiento = Column(String(50))
     confianza = Column(Numeric(5, 4))
     palabras_clave = Column(Text)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones ORM
+    comentario = relationship("ComentarioModel", back_populates="analisis_nlp")
 
 
 class TiempoAtencionModel(Base):
@@ -44,9 +55,12 @@ class TiempoAtencionModel(Base):
     __table_args__ = {'extend_existing': True}
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    cliente_id = Column(BigInteger, ForeignKey("clientes.id"), nullable=True)
+    cliente_id = Column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
     tiempo_minutos = Column(Numeric(10, 2), nullable=False)
     fecha = Column(Date, server_default=func.current_date())
+
+    # Relaciones ORM
+    cliente = relationship("ClienteModel", back_populates="tiempos_atencion")
 
 
 class MetricasEstadisticasModel(Base):
@@ -64,7 +78,7 @@ class MetricasEstadisticasModel(Base):
     maximo = Column(Numeric(10, 2))
     percentil_25 = Column(Numeric(10, 2))
     percentil_75 = Column(Numeric(10, 2))
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class OptimizacionModel(Base):
@@ -78,4 +92,4 @@ class OptimizacionModel(Base):
     costo_inicial = Column(Numeric(12, 2))
     costo_optimizado = Column(Numeric(12, 2))
     resultado = Column(Text)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -112,7 +112,7 @@ def ejecutar_escaneo(db: Session = Depends(get_db)):
 
     # 2. Verificar tiempos de atención
     estadisticas = calcular_estadisticas_avanzadas(_valores_tiempos(db))
-    media = estadisticas.get("media", 0)
+    media = float(estadisticas.get("media", 0) or 0)
     if media > 20:
         sugerencias.append({
             "titulo": "Tiempo de atención elevado",
@@ -122,14 +122,16 @@ def ejecutar_escaneo(db: Session = Depends(get_db)):
             "beneficio": "Reducción del tiempo de respuesta al cliente",
         })
 
-    # 3. Verificar precisión NLP (confianza promedio)
-    confianza_prom = db.query(func.avg(AnalisisNlpModel.confianza)).scalar()
-    if confianza_prom and float(confianza_prom) < 0.70:
+    # 3. Verificar precisión NLP (confianza promedio de forma segura)
+    confianza_res = db.query(func.avg(AnalisisNlpModel.confianza)).scalar()
+    confianza_val = float(confianza_res) if confianza_res is not None else 0.0
+
+    if confianza_val > 0 and confianza_val < 0.70:
         sugerencias.append({
             "titulo": "Reentrenamiento de modelo NLP recomendado",
             "categoria": "NLP",
             "impacto": "Medio",
-            "descripcion": f"La confianza promedio del modelo es {float(confianza_prom):.0%}. Ampliar el dataset mejorará la precisión.",
+            "descripcion": f"La confianza promedio del modelo es {confianza_val:.0%}. Ampliar el dataset mejorará la precisión.",
             "beneficio": "Mayor precisión en clasificación de sentimientos",
         })
 
@@ -146,7 +148,7 @@ def ejecutar_escaneo(db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# Endpoints de optimizaciones (tabla `optimizaciones` de Supabase)
+# Endpoints de optimizaciones
 # ---------------------------------------------------------------------------
 
 @router.get("/optimizaciones")
@@ -158,8 +160,8 @@ def listar_optimizaciones(db: Session = Depends(get_db)):
             "nombre": o.nombre,
             "descripcion": o.descripcion,
             "estado": o.estado,
-            "costo_inicial": o.costo_inicial,
-            "costo_optimizado": o.costo_optimizado,
+            "costo_inicial": float(o.costo_inicial) if o.costo_inicial is not None else None,
+            "costo_optimizado": float(o.costo_optimizado) if o.costo_optimizado is not None else None,
             "resultado": o.resultado,
         }
         for o in items
