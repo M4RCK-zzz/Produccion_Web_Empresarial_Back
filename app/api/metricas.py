@@ -11,7 +11,8 @@ from app.database.models import (
     TiempoAtencionModel,
 )
 
-router = APIRouter()
+# ✅ Solución: Definir el prefijo explícitamente en el router
+router = APIRouter(prefix="/api/metricas", tags=["Métricas"])
 
 
 # ---------------------------------------------------------------------------
@@ -140,8 +141,8 @@ def _desglose_indicadores(db: Session) -> list:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("")
-@router.get("/")
+# ✅ Soporta GET /api/metricas y /api/metricas/
+@router.get("/", status_code=200)
 def obtener_metricas(db: Session = Depends(get_db)):
     """Devuelve KPIs, tendencia mensual y desglose de indicadores."""
     kpis = _calcular_kpis(db)
@@ -152,8 +153,8 @@ def obtener_metricas(db: Session = Depends(get_db)):
     }
 
 
+# ✅ Soporta GET /api/metricas/exportar y /api/metricas/exportar/
 @router.get("/exportar")
-@router.get("/exportar/")
 def exportar_metricas(db: Session = Depends(get_db)):
     """Exporta las métricas como CSV descargable."""
     kpis = _calcular_kpis(db)

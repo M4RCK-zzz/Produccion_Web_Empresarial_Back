@@ -7,7 +7,8 @@ from sqlalchemy import func
 from app.database.connection import get_db
 from app.database.models import ComentarioModel, AnalisisNlpModel, ClienteModel
 
-router = APIRouter()
+# ✅ Solución: Prefijo explícito y asignación de tags
+router = APIRouter(prefix="/api/reportes", tags=["Reportes"])
 
 
 class GenerarReportePayload(BaseModel):
@@ -22,7 +23,7 @@ class GenerarReportePayload(BaseModel):
 def _datos_reporte(db: Session) -> dict:
     """Genera los datos reales del reporte desde la base de datos."""
     total = db.query(ComentarioModel).count()
-    procesados = db.query(ComentarioModel).filter(ComentarioModel.procesado == True).count()
+    procesados = db.query(ComentarioModel).filter(ComentarioModel.procesado.is_(True)).count()
 
     positivos = (
         db.query(ComentarioModel)
@@ -39,7 +40,7 @@ def _datos_reporte(db: Session) -> dict:
     neutros = procesados - positivos - negativos if procesados else 0
 
     promedio = db.query(func.avg(AnalisisNlpModel.confianza)).scalar()
-    total_clientes = db.query(ClienteModel).filter(ClienteModel.activo == True).count()
+    total_clientes = db.query(ClienteModel).filter(ClienteModel.activo.is_(True)).count()
 
     return {
         "total_comentarios": total,
@@ -69,33 +70,44 @@ def _generar_csv(datos: dict, tipo: str) -> bytes:
 
 
 def _generar_pdf(datos: dict, tipo: str) -> bytes:
-    """
-    Genera un PDF mínimo válido sin dependencias externas.
-    Para producción real, reemplazar con reportlab o weasyprint.
-    """
-    texto = (
-        f"REPORTE: {tipo}\n\n"
-        f"Total Comentarios : {datos['total_comentarios']}\n"
-        f"Procesados        : {datos['procesados']}\n"
-        f"Positivos         : {datos['positivos']}\n"
-        f"Neutros           : {datos['neutros']}\n"
-        f"Negativos         : {datos['negativos']}\n"
-        f"Polaridad Promedio: {datos['promedio_polaridad']}\n"
-        f"Total Clientes    : {datos['total_clientes']}\n"
-    )
-    # PDF mínimo válido (texto plano embebido)
-    stream = texto.encode("latin-1")
+    """Genera un PDF válido estructurado en bajo nivel sin dependencias externas."""
+    lineas_texto = [
+        f"REPORTE: {tipo.upper()}",
+        f"----------------------------------------",
+        f"Total Comentarios : {datos['total_comentarios']}",
+        f"Procesados        : {datos['procesados']}",
+        f"Positivos         : {datos['positivos']}",
+        f"Neutros           : {datos['neutros']}",
+        f"Negativos         : {datos['negativos']}",
+        f"Polaridad Promedio: {datos['promedio_polaridad']}",
+        f"Total Clientes    : {datos['total_clientes']}",
+    ]
+
+    # Construcción de comandos PDF para texto multilínea
+    pdf_cmds = ["BT", "/F1 12 Tf", "50 750 Td", "16 TL"]
+    for i, line in enumerate(lineas_texto):
+        # Escapar caracteres reservados de PDF
+        line_clean = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        if i == 0:
+            pdf_cmds.append(f"({line_clean}) Tj")
+        else:
+            pdf_cmds.append(f"T* ({line_clean}) Tj")
+    pdf_cmds.append("ET")
+    
+    stream_content = "\n".join(pdf_cmds).encode("latin-1")
+
     pdf = (
         b"%PDF-1.4\n"
         b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
         b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
         b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]\n"
         b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
-        + f"4 0 obj\n<< /Length {len(stream) + 50} >>\nstream\nBT /F1 12 Tf 50 750 Td\n".encode()
-        + stream
-        + b"\nET\nendstream\nendobj\n"
-        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
-        b"xref\ntrailer\n<< /Size 6 /Root 1 0 R >>\n%%EOF"
+        + f"4 0 obj\n<< /Length {len(stream_content)} >>\nstream\n".encode("latin-1")
+        + stream_content
+        + b"\nendstream\nendobj\n"
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n"
+        b"xref\n0 6\n0000000000 65535 f \n"
+        b"trailer\n<< /Size 6 /Root 1 0 R >>\n%%EOF"
     )
     return pdf
 
@@ -139,7 +151,7 @@ async def generar_reporte(
         media_type = "text/csv"
         extension = "csv"
     else:
-        # Excel: devolver CSV con extensión xlsx como fallback sin dependencias
+        # Excel: fallback a CSV con extensión xlsx
         contenido = _generar_csv(datos, payload.tipo)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         extension = "xlsx"

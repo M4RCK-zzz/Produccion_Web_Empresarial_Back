@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from app.database.connection import get_db
 from app.database.models import ClienteModel
 
-router = APIRouter()
+# ✅ Solución: Definir el prefijo explícitamente aquí
+router = APIRouter(prefix="/api/clientes", tags=["clientes"])
 
 # --- Esquemas Pydantic ---
 class ClienteBase(BaseModel):
@@ -32,8 +33,7 @@ class ClienteResponse(ClienteBase):
 
 # --- Endpoints ---
 
-# Aceptar solicitudes tanto con barra / como sin barra
-@router.get("", response_model=List[ClienteResponse])
+# ✅ Con el prefix en APIRouter, "/" procesa /api/clientes y /api/clientes/
 @router.get("/", response_model=List[ClienteResponse])
 def obtener_clientes(db: Session = Depends(get_db)):
     try:
@@ -43,7 +43,6 @@ def obtener_clientes(db: Session = Depends(get_db)):
         print(f"Error en GET /api/clientes: {e}")
         return []
 
-@router.post("", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED)
 def crear_cliente(cliente_in: ClienteCreate, db: Session = Depends(get_db)):
     # 1. Validar si el email ya existe

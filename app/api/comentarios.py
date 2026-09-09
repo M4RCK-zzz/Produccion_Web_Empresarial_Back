@@ -8,7 +8,8 @@ from app.database.connection import get_db
 from app.database.models import ComentarioModel, ClienteModel, AnalisisNlpModel
 from app.services.nltk_service import analizar_texto_nltk
 
-router = APIRouter()
+# ✅ Solución: Definir el prefijo explícitamente en el router
+router = APIRouter(prefix="/api/comentarios", tags=["comentarios"])
 
 # --- Esquemas Pydantic ---
 class ComentarioBase(BaseModel):
@@ -70,7 +71,7 @@ def _construir_respuesta(com: ComentarioModel, cli: ClienteModel, nlp: AnalisisN
 
 # --- Endpoints de Rutas Estáticas / Lista ---
 
-@router.get("", response_model=List[ComentarioResponse])
+# ✅ Con prefix="/api/comentarios", usar "/" soporta automáticamente peticiones a /api/comentarios y /api/comentarios/
 @router.get("/", response_model=List[ComentarioResponse])
 def obtener_comentarios(db: Session = Depends(get_db)):
     try:
@@ -87,7 +88,6 @@ def obtener_comentarios(db: Session = Depends(get_db)):
         return []
 
 
-@router.post("", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
 def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_db)):
     try:
@@ -154,7 +154,6 @@ def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_
 # --- Endpoints de Análisis Masivo ---
 
 @router.post("/analisis-masivo")
-@router.post("/analisis-masivo/")
 def ejecutar_analisis_masivo(db: Session = Depends(get_db)):
     try:
         comentarios = db.query(ComentarioModel).all()

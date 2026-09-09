@@ -19,7 +19,8 @@ from app.services.scipy_service import (
     ejecutar_optimizacion_lineal,
 )
 
-router = APIRouter()
+# ✅ Definir el prefijo explícito y tags en el router
+router = APIRouter(prefix="/api/scipy", tags=["SciPy"])
 
 
 class EstadisticasPayload(BaseModel):
@@ -45,13 +46,11 @@ def _valores_tiempos(db: Session) -> List[float]:
 # ---------------------------------------------------------------------------
 
 @router.get("/estadisticas")
-@router.get("/estadisticas/")
 def obtener_estadisticas(db: Session = Depends(get_db)):
     return calcular_estadisticas_avanzadas(_valores_tiempos(db))
 
 
 @router.post("/estadisticas")
-@router.post("/estadisticas/")
 def guardar_estadisticas(
     payload: Optional[EstadisticasPayload] = None,
     db: Session = Depends(get_db),
@@ -90,7 +89,6 @@ def guardar_estadisticas(
 # ---------------------------------------------------------------------------
 
 @router.post("/escaneo")
-@router.post("/escaneo/")
 def ejecutar_escaneo(db: Session = Depends(get_db)):
     """
     Analiza el estado actual del sistema y devuelve sugerencias de optimización
@@ -152,7 +150,6 @@ def ejecutar_escaneo(db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/optimizaciones")
-@router.get("/optimizaciones/")
 def listar_optimizaciones(db: Session = Depends(get_db)):
     items = db.query(OptimizacionModel).order_by(OptimizacionModel.created_at.desc()).all()
     return [
@@ -170,7 +167,6 @@ def listar_optimizaciones(db: Session = Depends(get_db)):
 
 
 @router.patch("/optimizaciones/{id}/estado")
-@router.patch("/optimizaciones/{id}/estado/")
 def actualizar_estado_optimizacion(
     id: int,
     payload: OptimizacionEstadoPayload,
@@ -190,13 +186,11 @@ def actualizar_estado_optimizacion(
 # ---------------------------------------------------------------------------
 
 @router.post("/optimizacion")
-@router.post("/optimizacion/")
 def post_optimizacion(payload: dict):
     return {"parametros_entrada": payload, "resultado": ejecutar_optimizacion_lineal(payload)}
 
 
 @router.post("/interpolacion")
-@router.post("/interpolacion/")
 def post_interpolacion(payload: dict):
     return ejecutar_interpolacion(
         payload.get("x", [1, 2, 3, 4, 5]),

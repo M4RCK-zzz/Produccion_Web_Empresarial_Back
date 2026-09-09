@@ -11,9 +11,8 @@ router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
-
+# ✅ Un solo decorador limpio
 @router.get("/graficos")
-@router.get("/graficos/")
 def obtener_graficos_dashboard(db: Session = Depends(get_db)):
     """
     Devuelve los datos reales para los dos gráficos del Dashboard:

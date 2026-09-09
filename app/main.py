@@ -19,7 +19,7 @@ from app.api.dashboard_api import router as dashboard_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Crear tablas si no existen al iniciar
+    # Crear tablas si no existen al iniciar la aplicación
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:
@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Empresa Inteligente API", lifespan=lifespan)
 
+# Configuración de CORS para producción y desarrollo local
 origins = [
     "https://produccion-web-empresarial-front.vercel.app",
     "http://localhost:5173",
@@ -39,12 +40,13 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https://.*-.*\.vercel\.app",  # Permite previews de Vercel
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Registra los routers
+# Registra los routers (los prefijos /api/... ya vienen definidos en cada APIRouter)
 app.include_router(clientes_router)
 app.include_router(comentarios_router)
 app.include_router(metricas_router)
@@ -67,7 +69,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": f"Error interno del servidor: {str(exc)}"},
     )
     origin = request.headers.get("origin")
-    if origin in origins:
+    if origin and (origin in origins or ".vercel.app" in origin):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
