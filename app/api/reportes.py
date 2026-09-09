@@ -1,74 +1,152 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+
+from app.database.connection import get_db
+from app.database.models import ComentarioModel, AnalisisNlpModel, ClienteModel
 
 router = APIRouter()
 
-# Schema para el cuerpo del reporte personalizado
+
 class GenerarReportePayload(BaseModel):
     tipo: str
     formato: str
 
-# 1. Endpoint para obtener las métricas generales del reporte
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _datos_reporte(db: Session) -> dict:
+    """Genera los datos reales del reporte desde la base de datos."""
+    total = db.query(ComentarioModel).count()
+    procesados = db.query(ComentarioModel).filter(ComentarioModel.procesado == True).count()
+
+    positivos = (
+        db.query(ComentarioModel)
+        .join(AnalisisNlpModel, ComentarioModel.id == AnalisisNlpModel.comentario_id)
+        .filter(AnalisisNlpModel.confianza > 0.05)
+        .count()
+    )
+    negativos = (
+        db.query(ComentarioModel)
+        .join(AnalisisNlpModel, ComentarioModel.id == AnalisisNlpModel.comentario_id)
+        .filter(AnalisisNlpModel.confianza < -0.05)
+        .count()
+    )
+    neutros = procesados - positivos - negativos if procesados else 0
+
+    promedio = db.query(func.avg(AnalisisNlpModel.confianza)).scalar()
+    total_clientes = db.query(ClienteModel).filter(ClienteModel.activo == True).count()
+
+    return {
+        "total_comentarios": total,
+        "procesados": procesados,
+        "positivos": positivos,
+        "neutros": max(neutros, 0),
+        "negativos": negativos,
+        "promedio_polaridad": round(float(promedio), 4) if promedio else 0.0,
+        "total_clientes": total_clientes,
+    }
+
+
+def _generar_csv(datos: dict, tipo: str) -> bytes:
+    lineas = [
+        f"Reporte: {tipo}",
+        "",
+        "INDICADOR,VALOR",
+        f"Total Comentarios,{datos['total_comentarios']}",
+        f"Procesados,{datos['procesados']}",
+        f"Positivos,{datos['positivos']}",
+        f"Neutros,{datos['neutros']}",
+        f"Negativos,{datos['negativos']}",
+        f"Polaridad Promedio,{datos['promedio_polaridad']}",
+        f"Total Clientes,{datos['total_clientes']}",
+    ]
+    return "\n".join(lineas).encode("utf-8")
+
+
+def _generar_pdf(datos: dict, tipo: str) -> bytes:
+    """
+    Genera un PDF mínimo válido sin dependencias externas.
+    Para producción real, reemplazar con reportlab o weasyprint.
+    """
+    texto = (
+        f"REPORTE: {tipo}\n\n"
+        f"Total Comentarios : {datos['total_comentarios']}\n"
+        f"Procesados        : {datos['procesados']}\n"
+        f"Positivos         : {datos['positivos']}\n"
+        f"Neutros           : {datos['neutros']}\n"
+        f"Negativos         : {datos['negativos']}\n"
+        f"Polaridad Promedio: {datos['promedio_polaridad']}\n"
+        f"Total Clientes    : {datos['total_clientes']}\n"
+    )
+    # PDF mínimo válido (texto plano embebido)
+    stream = texto.encode("latin-1")
+    pdf = (
+        b"%PDF-1.4\n"
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]\n"
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+        + f"4 0 obj\n<< /Length {len(stream) + 50} >>\nstream\nBT /F1 12 Tf 50 750 Td\n".encode()
+        + stream
+        + b"\nET\nendstream\nendobj\n"
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+        b"xref\ntrailer\n<< /Size 6 /Root 1 0 R >>\n%%EOF"
+    )
+    return pdf
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
 @router.get("/general")
-async def obtener_reporte_general():
-    try:
-        # Datos mock/ejemplo o conectarlos con tu servicio de reportes
-        data = {
-            "total_comentarios": 120,
-            "positivos": 75,
-            "neutros": 30,
-            "negativos": 15,
-            "promedio_polaridad": 0.65
-        }
-        return JSONResponse(status_code=status.HTTP_200_OK, content=data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al obtener reporte general: {str(e)}"
-        )
+async def obtener_reporte_general(db: Session = Depends(get_db)):
+    """Devuelve las métricas generales del sistema desde la BD real."""
+    return JSONResponse(content=_datos_reporte(db))
 
-# 2. Endpoint para descargar reporte directo en PDF
+
 @router.get("/exportar/pdf")
-async def descargar_reporte_pdf():
-    try:
-        contenido_pdf = b"%PDF-1.4 ... (Contenido binario del PDF)"
-        return Response(
-            content=contenido_pdf,
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": "attachment; filename=reporte_general.pdf"
-            }
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al exportar PDF: {str(e)}"
-        )
+async def exportar_pdf(db: Session = Depends(get_db)):
+    """Descarga un PDF con el reporte general."""
+    datos = _datos_reporte(db)
+    return Response(
+        content=_generar_pdf(datos, "General"),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=reporte_general.pdf"},
+    )
 
-# 3. Endpoint POST para generar reportes dinámicos por tipo/formato
+
 @router.post("/generar")
-async def generar_reporte(payload: GenerarReportePayload):
-    try:
-        if payload.formato.upper() == "PDF":
-            contenido = b"%PDF-1.4 ... (Contenido del Reporte PDF)"
-            media_type = "application/pdf"
-        elif payload.formato.upper() == "CSV":
-            contenido = b"id,nombre,tipo\n1,Reporte NLP,NLP"
-            media_type = "text/csv"
-        else:
-            contenido = b"id,nombre\n1,Reporte Excel"
-            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+async def generar_reporte(
+    payload: GenerarReportePayload,
+    db: Session = Depends(get_db),
+):
+    """Genera y descarga un reporte según tipo y formato solicitado."""
+    datos = _datos_reporte(db)
+    fmt = payload.formato.upper()
 
-        return Response(
-            content=contenido,
-            media_type=media_type,
-            headers={
-                "Content-Disposition": f"attachment; filename=reporte.{payload.formato.lower()}"
-            }
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al generar reporte: {str(e)}"
-        )
+    if fmt == "PDF":
+        contenido = _generar_pdf(datos, payload.tipo)
+        media_type = "application/pdf"
+        extension = "pdf"
+    elif fmt == "CSV":
+        contenido = _generar_csv(datos, payload.tipo)
+        media_type = "text/csv"
+        extension = "csv"
+    else:
+        # Excel: devolver CSV con extensión xlsx como fallback sin dependencias
+        contenido = _generar_csv(datos, payload.tipo)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        extension = "xlsx"
+
+    nombre = f"reporte_{payload.tipo.lower().replace(' ', '_')}.{extension}"
+    return Response(
+        content=contenido,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={nombre}"},
+    )
