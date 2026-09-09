@@ -19,7 +19,8 @@ class ComentarioBase(BaseModel):
     cliente_id: Optional[int] = None
 
 class ComentarioCreate(ComentarioBase):
-    pass
+    cliente_nombre: Optional[str] = None
+    empresa: Optional[str] = None
 
 class ComentarioResponse(ComentarioBase):
     id: int
@@ -51,7 +52,6 @@ def obtener_comentarios(db: Session = Depends(get_db)):
         for com, cli, nlp in resultados:
             polaridad_val = nlp.confianza if nlp and nlp.confianza is not None else 0.0
             
-            # Lógica para inferir el texto de sentimiento
             if not com.procesado:
                 sentimiento_str = "Pendiente"
             elif polaridad_val > 0.05:
@@ -86,10 +86,35 @@ def obtener_comentarios(db: Session = Depends(get_db)):
 @router.post("/", response_model=ComentarioResponse, status_code=status.HTTP_201_CREATED)
 def crear_comentario(comentario_in: ComentarioCreate, db: Session = Depends(get_db)):
     try:
-        nuevo_comentario = ComentarioModel(**comentario_in.model_dump())
+        cliente_id_asignado = comentario_in.cliente_id
+
+        # Busca o crea el cliente si se envió un nombre desde el formulario
+        if comentario_in.cliente_nombre and not cliente_id_asignado:
+            cliente_existente = db.query(ClienteModel).filter(
+                ClienteModel.nombre == comentario_in.cliente_nombre
+            ).first()
+
+            if cliente_existente:
+                cliente_id_asignado = cliente_existente.id
+            else:
+                nuevo_cliente = ClienteModel(
+                    nombre=comentario_in.cliente_nombre,
+                    empresa=comentario_in.empresa or "N/A"
+                )
+                db.add(nuevo_cliente)
+                db.commit()
+                db.refresh(nuevo_cliente)
+                cliente_id_asignado = nuevo_cliente.id
+
+        # Prepara los datos excluyendo los campos adicionales para ComentarioModel
+        datos_comentario = comentario_in.model_dump(exclude={"cliente_nombre", "empresa"})
+        datos_comentario["cliente_id"] = cliente_id_asignado
+
+        nuevo_comentario = ComentarioModel(**datos_comentario)
         db.add(nuevo_comentario)
         db.commit()
         db.refresh(nuevo_comentario)
+
         return nuevo_comentario
     except Exception as e:
         db.rollback()
