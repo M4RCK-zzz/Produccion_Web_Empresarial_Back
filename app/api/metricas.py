@@ -9,7 +9,7 @@ from app.database.models import (
     ClienteModel,
     AnalisisNlpModel,
     TiempoAtencionModel,
-    MetricaEstadisticaModel,
+    MetricasEstadisticaModel,
 )
 
 router = APIRouter()
