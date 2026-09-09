@@ -1,17 +1,18 @@
 from datetime import date
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
 from app.database.models import (
-    MetricasEstadisticasModel,
-    TiempoAtencionModel,
-    OptimizacionModel,
     ComentarioModel,
+    ClienteModel,
     AnalisisNlpModel,
+    TiempoAtencionModel,
+    MetricasEstadisticasModel,
+    OptimizacionModel,
 )
 from app.services.scipy_service import (
     calcular_estadisticas_avanzadas,
@@ -22,12 +23,22 @@ from app.services.scipy_service import (
 router = APIRouter()
 
 
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
 class EstadisticasPayload(BaseModel):
     valores: Optional[List[float]] = None
 
 
 class OptimizacionEstadoPayload(BaseModel):
     estado: str  # "pendiente" | "en_proceso" | "completado"
+
+
+class InterpolacionPayload(BaseModel):
+    x: List[float] = Field(default_factory=lambda: [1.0, 2.0, 3.0, 4.0, 5.0])
+    y: List[float] = Field(default_factory=lambda: [10.0, 20.0, 15.0, 30.0, 25.0])
+    x_nuevo: float = 2.5
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +107,7 @@ def ejecutar_escaneo(db: Session = Depends(get_db)):
 
     # 1. Verificar comentarios sin procesar
     total = db.query(ComentarioModel).count()
-    sin_procesar = db.query(ComentarioModel).filter(ComentarioModel.procesado == False).count()
+    sin_procesar = db.query(ComentarioModel).filter(ComentarioModel.procesado.is_(False)).count()
     porcentaje_sin_procesar = (sin_procesar / total * 100) if total else 0
 
     if porcentaje_sin_procesar > 20:
@@ -131,6 +142,17 @@ def ejecutar_escaneo(db: Session = Depends(get_db)):
             "beneficio": "Mayor precisión en clasificación de sentimientos",
         })
 
+    # 4. Verificar total de clientes activos
+    total_clientes = db.query(ClienteModel).filter(ClienteModel.activo.is_(True)).count()
+    if total_clientes == 0:
+        sugerencias.append({
+            "titulo": "Sin clientes activos",
+            "categoria": "Clientes",
+            "impacto": "Medio",
+            "descripcion": "No se registran clientes activos actualmente en la base de datos.",
+            "beneficio": "Permite registrar y vincular la actividad de usuarios",
+        })
+
     if not sugerencias:
         sugerencias.append({
             "titulo": "Sistema en estado óptimo",
@@ -157,8 +179,8 @@ def listar_optimizaciones(db: Session = Depends(get_db)):
             "nombre": o.nombre,
             "descripcion": o.descripcion,
             "estado": o.estado,
-            "costo_inicial": o.costo_inicial,
-            "costo_optimizado": o.costo_optimizado,
+            "costo_inicial": float(o.costo_inicial) if o.costo_inicial is not None else None,
+            "costo_optimizado": float(o.costo_optimizado) if o.costo_optimizado is not None else None,
             "resultado": o.resultado,
         }
         for o in items
@@ -187,15 +209,16 @@ def actualizar_estado_optimizacion(
 
 @router.post("/optimizacion")
 @router.post("/optimizacion/")
-def post_optimizacion(payload: dict):
+def post_optimizacion(payload: Dict[str, Any]):
     return {"parametros_entrada": payload, "resultado": ejecutar_optimizacion_lineal(payload)}
 
 
 @router.post("/interpolacion")
 @router.post("/interpolacion/")
-def post_interpolacion(payload: dict):
+def post_interpolacion(payload: Optional[InterpolacionPayload] = None):
+    data = payload or InterpolacionPayload()
     return ejecutar_interpolacion(
-        payload.get("x", [1, 2, 3, 4, 5]),
-        payload.get("y", [10, 20, 15, 30, 25]),
-        payload.get("x_nuevo", 2.5),
+        data.x,
+        data.y,
+        data.x_nuevo,
     )
