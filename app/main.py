@@ -27,7 +27,12 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Empresa Inteligente API", lifespan=lifespan)
+# Deshabilitar redirección automática de slashes para evitar romper peticiones CORS
+app = FastAPI(
+    title="Empresa Inteligente API", 
+    lifespan=lifespan,
+    redirect_slashes=False
+)
 
 # Configuración de CORS para producción y desarrollo local
 origins = [
@@ -46,7 +51,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registra los routers (los prefijos /api/... ya vienen definidos en cada APIRouter)
+# Registra los routers
 app.include_router(clientes_router)
 app.include_router(comentarios_router)
 app.include_router(metricas_router)
@@ -64,12 +69,18 @@ def root():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     print(f"Excepción no controlada en {request.url}: {exc}")
+    
+    origin = request.headers.get("origin", "")
     response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": f"Error interno del servidor: {str(exc)}"},
     )
-    origin = request.headers.get("origin")
-    if origin and (origin in origins or ".vercel.app" in origin):
+    
+    # Inyectar CORS siempre que exista un origen en la petición
+    if origin:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        
     return response
