@@ -7,17 +7,28 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 
-# Descarga preventiva de paquetes de NLTK
-recursos_nltk = ['punkt', 'punkt_tab', 'stopwords']
-for recurso in recursos_nltk:
+# 1. Configurar directorio de datos NLTK en /tmp para entornos como Render
+nltk_data_dir = os.path.join("/tmp", "nltk_data")
+if nltk_data_dir not in nltk.data.path:
+    nltk.data.path.append(nltk_data_dir)
+
+# Descarga segura de paquetes NLTK
+recursos_nltk = [
+    ('punkt', 'tokenizers/punkt'),
+    ('punkt_tab', 'tokenizers/punkt_tab'),
+    ('stopwords', 'corpora/stopwords')
+]
+
+for recurso, ruta in recursos_nltk:
     try:
-        nltk.data.find(f'tokenizers/{recurso}' if 'punkt' in recurso else f'corpora/{recurso}')
+        nltk.data.find(ruta)
     except LookupError:
-        nltk.download(recurso, quiet=True)
+        try:
+            nltk.download(recurso, download_dir=nltk_data_dir, quiet=True)
+        except Exception as e:
+            print(f"Error descargando recurso {recurso}: {e}")
 
-MODEL_PATH = "model_sentiment.pkl"
-
-# Dataset de entrenamiento inicial en español para Machine Learning
+# Dataset de entrenamiento inicial en español
 DATASET_ENTRENAMIENTO = [
     # Positivos
     ("Excelente servicio y muy rápida atención", "Positivo"),
@@ -42,34 +53,21 @@ DATASET_ENTRENAMIENTO = [
     ("Envié los documentos requeridos a su correo", "Neutro"),
 ]
 
-def entrenar_o_cargar_modelo():
-    """Entrena un Pipeline de Machine Learning (TF-IDF + Naive Bayes) si no existe en disco."""
-    if os.path.exists(MODEL_PATH):
-        try:
-            return joblib.load(MODEL_PATH)
-        except Exception as e:
-            print(f"Error al cargar modelo guardado: {e}. Reentrenando...")
-
+def entrenar_modelo():
+    """Entrena un Pipeline de ML ligero directamente en memoria."""
     textos = [item[0] for item in DATASET_ENTRENAMIENTO]
     etiquetas = [item[1] for item in DATASET_ENTRENAMIENTO]
 
-    # Pipeline ML: Vectorizador TF-IDF + Clasificador Multinomial Naive Bayes
     pipeline = Pipeline([
         ('tfidf', TfidfVectorizer(ngram_range=(1, 2))),
         ('clf', MultinomialNB())
     ])
 
     pipeline.fit(textos, etiquetas)
-    
-    try:
-        joblib.dump(pipeline, MODEL_PATH)
-    except Exception as e:
-        print(f"No se pudo guardar el modelo en disco: {e}")
-
     return pipeline
 
-# Instancia global del modelo ML
-modelo_ml = entrenar_o_cargar_modelo()
+# Instancia global del modelo ML en memoria
+modelo_ml = entrenar_modelo()
 
 def analizar_texto_nltk(texto: str) -> dict:
     if not texto or not texto.strip():
@@ -83,10 +81,15 @@ def analizar_texto_nltk(texto: str) -> dict:
             "confianza": 0.0
         }
 
-    # 1. Extracción de tokens y palabras frecuentes con NLTK
+    # 1. Extracción de tokens con fallback seguro si falla la tokenización NLTK
     texto_lower = texto.lower()
-    palabras = [p for p in nltk.word_tokenize(texto_lower) if p.isalnum()]
-    
+    try:
+        tokens_raw = nltk.word_tokenize(texto_lower)
+    except Exception:
+        tokens_raw = texto_lower.split()
+
+    palabras = [p for p in tokens_raw if p.isalnum()]
+
     try:
         stopwords_es = set(nltk.corpus.stopwords.words('spanish'))
     except Exception:
@@ -100,11 +103,11 @@ def analizar_texto_nltk(texto: str) -> dict:
     prediccion = modelo_ml.predict([texto])[0]
     probabilidades = modelo_ml.predict_proba([texto])[0]
     clases = list(modelo_ml.classes_)
-    
+
     idx_pred = clases.index(prediccion)
     confianza = float(probabilidades[idx_pred])
 
-    # Cálculo de la polaridad escalar (-1.0 a 1.0) según la clase predicha y su probabilidad
+    # Cálculo de la polaridad escalar (-1.0 a 1.0)
     if prediccion == "Positivo":
         polaridad = round(confianza, 2)
     elif prediccion == "Negativo":

@@ -1,7 +1,13 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+# 1. Cargar la base de datos y los modelos explícitamente
+from app.database.connection import engine, Base
+import app.database.models  # 👈 OBLIGATORIO para registrar modelos en SQLAlchemy
+
+# Routers
 from app.api.clientes import router as clientes_router
 from app.api.comentarios import router as comentarios_router
 from app.api.metricas import router as metricas_router
@@ -10,7 +16,18 @@ from app.api.scipy import router as scipy_router
 from app.api.reportes import router as reportes_router
 from app.api.dashboard_api import router as dashboard_router
 
-app = FastAPI(title="Empresa Inteligente API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Crear tablas si no existen al iniciar
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Error al conectar/crear tablas en la BD: {e}")
+    yield
+
+
+app = FastAPI(title="Empresa Inteligente API", lifespan=lifespan)
 
 origins = [
     "https://produccion-web-empresarial-front.vercel.app",
@@ -27,14 +44,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registra los routers directos (ya traen su prefijo /api/... definido internamente)
+# Registra los routers
 app.include_router(clientes_router)
 app.include_router(comentarios_router)
 app.include_router(metricas_router)
 app.include_router(nltk_router)
 app.include_router(scipy_router)
 app.include_router(reportes_router)
-app.include_router(dashboard_router)  # ✅ Sin duplicar /api/dashboard
+app.include_router(dashboard_router)
+
+
+@app.get("/")
+def root():
+    return {"status": "online", "message": "API ejecutándose correctamente"}
 
 
 @app.exception_handler(Exception)
