@@ -1,67 +1,95 @@
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.database.models import AnalisisNlpModel, ComentarioModel, TiempoAtencionModel
+from app.database.models import ComentarioModel, AnalisisNlpModel, TiempoAtencionModel
 
-# Define el prefijo completo de la API en el APIRouter
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
-DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
-# ✅ Un solo decorador limpio
-@router.get("/graficos")
-def obtener_graficos_dashboard(db: Session = Depends(get_db)):
-    """
-    Devuelve los datos reales para los dos gráficos del Dashboard:
-    - tiempos_semana: tiempos de atención agrupados por día (últimos 7 días)
-    - distribucion_categorias: conteo de comentarios por categoría NLTK
-    """
+def _obtener_graficos(db: Session) -> dict:
     hoy = date.today()
+    meses_nombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    
+    tendencia_meses = []
+    
+    for i in range(5, -1, -1):
+        # Cálculo exacto del periodo mensual
+        ano_target = hoy.year
+        mes_target = hoy.month - i
+        while mes_target <= 0:
+            mes_target += 12
+            ano_target -= 1
 
-    # --- Gráfico 1: Tiempos de atención por día (últimos 7 días) ---
-    tiempos_semana = []
-    for offset in range(6, -1, -1):
-        dia = hoy - timedelta(days=offset)
-        promedio = (
-            db.query(func.avg(TiempoAtencionModel.tiempo_minutos))
-            .filter(TiempoAtencionModel.fecha == dia)
-            .scalar()
+        primer_dia = date(ano_target, mes_target, 1)
+        if mes_target == 12:
+            ultimo_dia = date(ano_target + 1, 1, 1) - timedelta(days=1)
+        else:
+            ultimo_dia = date(ano_target, mes_target + 1, 1) - timedelta(days=1)
+
+        # 1. Total comentarios del mes
+        total_comentarios = (
+            db.query(ComentarioModel)
+            .filter(
+                func.date(ComentarioModel.fecha) >= primer_dia,
+                func.date(ComentarioModel.fecha) <= ultimo_dia,
+            )
+            .count()
         )
-        tiempos_semana.append({
-            "dia": DIAS_ES[dia.weekday()],
-            "tiempo": round(float(promedio), 2) if promedio else 0,
+
+        # 2. Comentarios positivos del mes
+        positivos = (
+            db.query(ComentarioModel)
+            .join(AnalisisNlpModel, ComentarioModel.id == AnalisisNlpModel.comentario_id)
+            .filter(
+                func.date(ComentarioModel.fecha) >= primer_dia,
+                func.date(ComentarioModel.fecha) <= ultimo_dia,
+                AnalisisNlpModel.confianza > 0.05,
+            )
+            .count()
+        )
+
+        negativos = max(total_comentarios - positivos, 0)
+
+        tendencia_meses.append({
+            "mes": meses_nombres[primer_dia.month - 1],
+            "comentarios": total_comentarios,
+            "positivos": positivos,
+            "negativos": negativos,
         })
 
-    # --- Gráfico 2: Distribución de categorías desde comentarios analizados ---
-    categorias_raw = (
-        db.query(ComentarioModel.categoria, func.count(ComentarioModel.id))
-        .filter(ComentarioModel.categoria.isnot(None))
-        .group_by(ComentarioModel.categoria)
-        .all()
-    )
+    # Distribución por sentimiento general (Protección contra listas vacías)
+    total_analisis = db.query(AnalisisNlpModel).count()
+    pos_total = db.query(AnalisisNlpModel).filter(AnalisisNlpModel.confianza > 0.05).count()
+    neg_total = db.query(AnalisisNlpModel).filter(AnalisisNlpModel.confianza < -0.05).count()
+    neu_total = max(total_analisis - pos_total - neg_total, 0)
 
-    distribucion = [
-        {"name": cat or "Sin categoría", "value": count}
-        for cat, count in categorias_raw
-    ]
-
-    # Si no hay datos reales de categorías, usar las del análisis NLP
-    if not distribucion:
-        nlp_cats = (
-            db.query(AnalisisNlpModel.categoria_detectada, func.count(AnalisisNlpModel.id))
-            .filter(AnalisisNlpModel.categoria_detectada.isnot(None))
-            .group_by(AnalisisNlpModel.categoria_detectada)
-            .all()
-        )
-        distribucion = [
-            {"name": cat or "Sin categoría", "value": count}
-            for cat, count in nlp_cats
-        ]
+    # Tiempo promedio de atención (Evita error 500 cuando el promedio retorna None)
+    tiempo_prom_scalar = db.query(func.avg(TiempoAtencionModel.tiempo_minutos)).scalar()
+    tiempo_prom = round(float(tiempo_prom_scalar), 2) if tiempo_prom_scalar is not None else 0.0
 
     return {
-        "tiempos_semana": tiempos_semana,
-        "distribucion_categorias": distribucion,
+        "tendencia_mensual": tendencia_meses,
+        "distribucion_sentimiento": [
+            {"nombre": "Positivos", "valor": pos_total},
+            {"nombre": "Neutros", "valor": neu_total},
+            {"nombre": "Negativos", "valor": neg_total},
+        ],
+        "tiempo_promedio_minutos": tiempo_prom,
     }
+
+
+@router.get("/graficos")
+def obtener_graficos_dashboard(db: Session = Depends(get_db)):
+    """Retorna los datos estructurados para los gráficos del Dashboard."""
+    try:
+        return _obtener_graficos(db)
+    except Exception as e:
+        # Imprime el error exacto en los logs de Render para depuración
+        print(f"Error en /api/dashboard/graficos: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al procesar los datos de gráficos: {str(e)}"
+        )
