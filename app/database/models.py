@@ -42,7 +42,7 @@ class AnalisisNlpModel(Base):
     confianza = Column(Numeric(5, 4))
     fecha_analisis = Column(TIMESTAMP, server_default=func.now())
 
-class TiemposAtencionModel(Base):
+class TiempoAtencionModel(Base):
     __tablename__ = "tiempos_atencion"
     __table_args__ = {'extend_existing': True}
 
