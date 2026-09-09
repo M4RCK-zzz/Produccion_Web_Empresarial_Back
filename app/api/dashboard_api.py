@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import date, timedelta
+from fastapi import APIRouter, Depends
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.database.models import ComentarioModel, TiempoAtencionModel, AnalisisNlpModel
+from app.database.models import AnalisisNlpModel, ComentarioModel, TiempoAtencionModel
 
-router = APIRouter()
+# Define el prefijo completo de la API en el APIRouter
+router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
